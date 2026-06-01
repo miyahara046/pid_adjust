@@ -24,13 +24,13 @@ Git追跡除外設定
 
 Windowsの「コマンドプロンプト（cmd）」または「PowerShell」を開き、```pid_adjust``` で以下を順に実行
 
-1. 仮想環境（.venv）の作成
+1.仮想環境（.venv）の作成
 
 ```shell
 python -m venv .venv
 ```
 
-1. 仮想環境の有効化
+2.仮想環境の有効化
 
 ### コマンドプロンプトの場合
 
@@ -45,13 +45,13 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 .\.venv\Scripts\activate
 ```
 
-1. 必要なライブラリのインストール
+3.必要なライブラリのインストール
 
 ```shell
 pip install streamlit pandas plotly
 ```
 
-1. アプリケーションの起動
+4.アプリケーションの起動
 
 ```shell
 streamlit run app.py
