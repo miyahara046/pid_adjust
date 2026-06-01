@@ -45,6 +45,14 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 .\.venv\Scripts\activate
 ```
 
+ここで
+
+```shell
+(.venv) PS C:
+```
+
+こうなるといい
+
 3.必要なライブラリのインストール
 
 ```shell
