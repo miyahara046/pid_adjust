@@ -180,6 +180,12 @@ def analyze_csv(csv_data, target_val, kp_l, ki_l, kd_l, kp_r, ki_r, kd_r):
     return {
         "timestamp": datetime.now().isoformat(),
         "target_val": target_val,
+        "kp_l": float(kp_l),
+        "ki_l": float(ki_l),
+        "kd_l": float(kd_l),
+        "kp_r": float(kp_r),
+        "ki_r": float(ki_r),
+        "kd_r": float(kd_r),
         "left_motor": {
             "score": float(left_score),
             "max_speed": float(left_result["max_speed"]),

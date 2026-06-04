@@ -6,6 +6,26 @@ import numpy as np
 import os
 from datetime import datetime
 from scipy.signal import find_peaks
+import requests
+import io
+
+def fetch_results(api_url):
+    try:
+        response = requests.get(f"{api_url}/results", timeout=3.0)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return None
+
+def fetch_result_csv(api_url, timestamp_key):
+    try:
+        response = requests.get(f"{api_url}/results/{timestamp_key}/csv", timeout=5.0)
+        if response.status_code == 200:
+            return io.BytesIO(response.content)
+    except Exception:
+        pass
+    return None
 
 def detect_hunting(speed, target):
     speed = np.array(speed)
@@ -39,27 +59,93 @@ HISTORY_FILE = "history.csv"
 st.title("総合調整補助ツール")
 st.caption("PIDゲイン調整・速度応答解析・パワー解析・左右バランス調整・動画解析")
 
+# session_state の初期化
+if "target_val" not in st.session_state:
+    st.session_state["target_val"] = 500.0
+if "kp_l" not in st.session_state:
+    st.session_state["kp_l"] = 1.00
+if "ki_l" not in st.session_state:
+    st.session_state["ki_l"] = 0.00
+if "kd_l" not in st.session_state:
+    st.session_state["kd_l"] = 0.00
+if "kp_r" not in st.session_state:
+    st.session_state["kp_r"] = 1.00
+if "ki_r" not in st.session_state:
+    st.session_state["ki_r"] = 0.00
+if "kd_r" not in st.session_state:
+    st.session_state["kd_r"] = 0.00
+if "loaded_run_key" not in st.session_state:
+    st.session_state["loaded_run_key"] = None
+
+st.sidebar.header("データソース設定")
+data_source = st.sidebar.radio(
+    "データ入力モード",
+    ["ローカルCSVファイルをアップロード", "サーバーと同期（最新データ）"]
+)
+
+api_url = "http://localhost:8000"
+results = None
+run_options = {}
+
+if data_source == "サーバーと同期（最新データ）":
+    api_url = st.sidebar.text_input("APIサーバーURL", value=api_url)
+    if st.sidebar.button("🔄 サーバーからデータを再読込"):
+        st.rerun()
+
+    results = fetch_results(api_url)
+    if results:
+        for r in results:
+            try:
+                dt = datetime.fromisoformat(r["timestamp"])
+                formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                formatted_time = r["timestamp"]
+            display_str = f"🕒 {formatted_time} (左スコア: {r['left_score']:.1f}, 右スコア: {r['right_score']:.1f})"
+            run_options[display_str] = r
+
+        if "selected_run_display" in st.session_state and st.session_state["selected_run_display"] in run_options:
+            selected_display = st.session_state["selected_run_display"]
+        else:
+            selected_display = list(run_options.keys())[0] if run_options else None
+            if selected_display:
+                st.session_state["selected_run_display"] = selected_display
+
+        if selected_display:
+            selected_run = run_options[selected_display]
+            selected_key = selected_run["timestamp_key"]
+
+            if st.session_state["loaded_run_key"] != selected_key:
+                st.session_state["loaded_run_key"] = selected_key
+                st.session_state["target_val"] = float(selected_run["target_val"])
+                st.session_state["kp_l"] = float(selected_run["kp_l"])
+                st.session_state["ki_l"] = float(selected_run["ki_l"])
+                st.session_state["kd_l"] = float(selected_run["kd_l"])
+                st.session_state["kp_r"] = float(selected_run["kp_r"])
+                st.session_state["ki_r"] = float(selected_run["ki_r"])
+                st.session_state["kd_r"] = float(selected_run["kd_r"])
+
+st.sidebar.markdown("---")
 st.sidebar.header("現在の制御パラメータ")
 
 target_val = st.sidebar.number_input(
     "ターゲット値（目標スピード）",
-    value=500.0,
+    key="target_val",
     step=50.0
 )
 
 st.sidebar.markdown("---")
 
 st.sidebar.subheader("左モーター")
-kp_l = st.sidebar.number_input("Kp (左)", value=1.00, step=0.1, format="%.2f")
-ki_l = st.sidebar.number_input("Ki (左)", value=0.00, step=0.05, format="%.2f")
-kd_l = st.sidebar.number_input("Kd (左)", value=0.00, step=0.05, format="%.2f")
+kp_l = st.sidebar.number_input("Kp (左)", key="kp_l", step=0.1, format="%.2f")
+ki_l = st.sidebar.number_input("Ki (左)", key="ki_l", step=0.05, format="%.2f")
+kd_l = st.sidebar.number_input("Kd (左)", key="kd_l", step=0.05, format="%.2f")
 
 st.sidebar.markdown("---")
 
 st.sidebar.subheader("右モーター")
-kp_r = st.sidebar.number_input("Kp (右)", value=1.00, step=0.1, format="%.2f")
-ki_r = st.sidebar.number_input("Ki (右)", value=0.00, step=0.05, format="%.2f")
-kd_r = st.sidebar.number_input("Kd (右)", value=0.00, step=0.05, format="%.2f")
+kp_r = st.sidebar.number_input("Kp (右)", key="kp_r", step=0.1, format="%.2f")
+ki_r = st.sidebar.number_input("Ki (右)", key="ki_r", step=0.05, format="%.2f")
+kd_r = st.sidebar.number_input("Kd (右)", key="kd_r", step=0.05, format="%.2f")
 
 def analyze_wave(time, speed, power, target):
     # 入力が十分でない場合は解析しない
@@ -192,17 +278,45 @@ tab_csv, tab_video = st.tabs(["CSV解析", "動画解析"])
 
 # ========== タブ1: CSV解析 ==========
 with tab_csv:
-    st.header("実機データの読み込み")
+    df = None
+    
+    if data_source == "ローカルCSVファイルをアップロード":
+        st.header("実機データの読み込み")
+        # CSVファイルをユーザに選択してもらい、データを読み込む
+        uploaded_file = st.file_uploader(
+            "CSVファイルを選択してください",
+            type=["csv"]
+        )
+        if uploaded_file is not None:
+            df = pd.read_csv(uploaded_file)
+            
+    else:  # "サーバーと同期（最新データ）"
+        st.header("サーバーから測定結果を同期中")
+        if results is None:
+            st.error(f"APIサーバー ({api_url}) に接続できませんでした。サーバーが起動しているか確認してください。")
+            st.info("※ ローカル環境での起動手順：\n`python api.py` を実行してAPIサーバーを起動してください。")
+        elif len(results) == 0:
+            st.warning("APIサーバーにはまだ解析データがアップロードされていません。")
+            st.info("PowerShellスクリプトやcurl等でデータを送信すると、ここに自動同期されます。")
+        else:
+            selected_display = st.selectbox(
+                "同期されたデータ履歴を選択してください",
+                options=list(run_options.keys()),
+                key="selected_run_display"
+            )
+            
+            if selected_display:
+                selected_run = run_options[selected_display]
+                selected_key = selected_run["timestamp_key"]
+                
+                # CSVデータをロード
+                csv_bytes = fetch_result_csv(api_url, selected_key)
+                if csv_bytes is not None:
+                    df = pd.read_csv(csv_bytes)
+                else:
+                    st.error("サーバーからのCSVデータの取得に失敗しました。")
 
-    # CSVファイルをユーザに選択してもらい、データを読み込む
-    uploaded_file = st.file_uploader(
-        "CSVファイルを選択してください",
-        type=["csv"]
-    )
-
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-
+    if df is not None:
         required_cols = [
             "time",
             "leftSpeed",

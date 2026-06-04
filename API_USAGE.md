@@ -5,7 +5,7 @@
 ### 1. 必要なパッケージのインストール
 
 ```bash
-pip install fastapi uvicorn
+pip install fastapi uvicorn python-multipart
 ```
 
 ### 2. サーバーの起動
@@ -15,6 +15,26 @@ python api.py
 ```
 
 サーバーは `http://localhost:8000` で起動します。
+
+---
+
+## ダッシュボード表示（推奨）
+
+データを送信すると、自動的にサーバー側でHTMLダッシュボードに結果が表示されます。
+
+**ブラウザで開く：**
+
+```
+http://localhost:8000/dashboard
+```
+
+ダッシュボードには以下が表示されます：
+
+- 左右モーターの最新スコア
+- 推奨ゲイン（Kp、Ki、Kd）
+- アドバイス
+- 左右バランス分析
+- スコア推移グラフ（複数の解析結果がある場合）
 
 ---
 
@@ -31,56 +51,61 @@ CSVファイルをアップロードして解析を実行します。
 - `kp_l`, `ki_l`, `kd_l` (オプション): 左モーターのPIDゲイン
 - `kp_r`, `ki_r`, `kd_r` (オプション): 右モーターのPIDゲイン
 
-#### 使用例
+#### 手動でAPI呼び出しする場合
 
-**基本的な使い方:**
+**PowerShell:**
 
-```bash
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze
+```powershell
+# 実行ポリシーを一時的に許可
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
+# 基本的な使い方
+$form = @{ file = Get-Item "runlog.csv" }
+$response = Invoke-WebRequest -Uri "http://localhost:8000/analyze" -Method Post -Form $form
+$response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
 ```
 
 **ターゲット値を指定:**
 
-```bash
-curl -X POST -F "file=@data.csv" -F "target_val=600" http://localhost:8000/analyze
+```powershell
+$form = @{
+    file = Get-Item "runlog.csv"
+    target_val = "600"
+}
+$response = Invoke-WebRequest -Uri "http://localhost:8000/analyze" -Method Post -Form $form
+$response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
 ```
 
-**すべてのパラメータを指定:**
-
-```bash
-curl -X POST \
-  -F "file=@data.csv" \
-  -F "target_val=500" \
-  -F "kp_l=1.0" \
-  -F "ki_l=0.05" \
-  -F "kd_l=0.1" \
-  -F "kp_r=1.0" \
-  -F "ki_r=0.05" \
-  -F "kd_r=0.1" \
-  http://localhost:8000/analyze
-```
-
-**JSON形式で結果を整形して表示（PowerShellの場合）:**
+**結果をファイルに保存:**
 
 ```powershell
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze | ConvertFrom-Json | ConvertTo-Json
+$form = @{ file = Get-Item "runlog.csv" }
+$response = Invoke-WebRequest -Uri "http://localhost:8000/analyze" -Method Post -Form $form
+$response.Content | Out-File "result.json" -Encoding UTF8
 ```
 
-**Linux/Macの場合:**
+**Linux/Mac（curl使用）:**
 
 ```bash
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze | python -m json.tool
+curl -X POST -F "file=@runlog.csv" http://localhost:8000/analyze | python -m json.tool
 ```
 
 ---
 
-### `/health` - GET
+### `/dashboard` - GET
 
-サーバーの状態確認
+ダッシュボードをブラウザで表示します。
 
-```bash
-curl http://localhost:8000/health
 ```
+http://localhost:8000/dashboard
+```
+
+機能：
+
+- 最新の解析結果を表示
+- 過去10件の結果を履歴として保存
+- スコア推移をグラフで表示
+- 見やすいUIで推奨ゲインとアドバイスを表示
 
 ---
 
