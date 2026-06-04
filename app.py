@@ -32,12 +32,12 @@ def detect_hunting(speed, target):
         "cycles": cycle_count
     }
 
-st.set_page_config(page_title="PIDゲイン調整・解析ツール", layout="wide")
+st.set_page_config(page_title="総合調整補助ツール", layout="wide")
 
 HISTORY_FILE = "history.csv"
 
-st.title("左右モーター PIDゲインアドバイザーツール")
-st.caption("CSV解析・左右差分析・ゲイン提案・評価スコア・履歴管理")
+st.title("総合調整補助ツール")
+st.caption("PIDゲイン調整・速度応答解析・パワー解析・左右バランス調整・動画解析")
 
 st.sidebar.header("現在の制御パラメータ")
 
@@ -187,262 +187,271 @@ def create_advice(result, target):
 
     return advice
 
-st.header("実機データの読み込み")
+# タブを作成
+tab_csv, tab_video = st.tabs(["CSV解析", "動画解析"])
 
-# CSVファイルをユーザに選択してもらい、データを読み込む
-uploaded_file = st.file_uploader(
-    "CSVファイルを選択してください",
-    type=["csv"]
-)
+# ========== タブ1: CSV解析 ==========
+with tab_csv:
+    st.header("実機データの読み込み")
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-
-    required_cols = [
-        "time",
-        "leftSpeed",
-        "rightSpeed",
-        "leftPower",
-        "rightPower"
-    ]
-
-    if not all(c in df.columns for c in required_cols):
-        st.error(f"必要列: {required_cols}")
-        st.stop()
-
-    left_result = analyze_wave(
-        df["time"].values,
-        df["leftSpeed"].values,
-        df["leftPower"].values,
-        target_val
+    # CSVファイルをユーザに選択してもらい、データを読み込む
+    uploaded_file = st.file_uploader(
+        "CSVファイルを選択してください",
+        type=["csv"]
     )
 
-    right_result = analyze_wave(
-        df["time"].values,
-        df["rightSpeed"].values,
-        df["rightPower"].values,
-        target_val
-    )
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
 
-    left_score = calculate_score(left_result, target_val)
-    right_score = calculate_score(right_result, target_val)
-
-    st.header("評価スコア")
-
-    c1, c2 = st.columns(2)
-
-    c1.metric("左スコア", f"{left_score:.1f}")
-    c2.metric("右スコア", f"{right_score:.1f}")
-
-    st.header("解析結果")
-
-    metrics = pd.DataFrame({
-        "項目": [
-            "最大速度",
-            "オーバーシュート[%]",
-            "定常偏差",
-            "立上り時間",
-            "標準偏差",
-            "ハンチング周期",
-            "Power飽和率[%]"
-        ],
-        "左": [
-            left_result["max_speed"],
-            left_result["overshoot"],
-            left_result["steady_error"],
-            left_result["rise_time"],
-            left_result["stable_std"],
-            left_result["hunting_cycles"],
-            left_result["saturation_ratio"]
-        ],
-        "右": [
-            right_result["max_speed"],
-            right_result["overshoot"],
-            right_result["steady_error"],
-            right_result["rise_time"],
-            right_result["stable_std"],
-            right_result["hunting_cycles"],
-            right_result["saturation_ratio"]
+        required_cols = [
+            "time",
+            "leftSpeed",
+            "rightSpeed",
+            "leftPower",
+            "rightPower"
         ]
-    })
 
-    st.dataframe(metrics, use_container_width=True)
+        if not all(c in df.columns for c in required_cols):
+            st.error(f"必要列: {required_cols}")
+            st.stop()
 
-    st.header("左右差分析")
-
-    left_avg = df["leftSpeed"].mean()
-    right_avg = df["rightSpeed"].mean()
-
-    diff_ratio = abs(left_avg - right_avg) / target_val * 100
-
-    if diff_ratio > 5:
-        if left_avg < right_avg:
-            st.warning(f"左モーターが {diff_ratio:.1f}% 遅いです")
-        else:
-            st.warning(f"右モーターが {diff_ratio:.1f}% 遅いです")
-    else:
-        st.success("左右差は小さいです")
-
-    # 回帰直線の計算
-    diff = (df["leftSpeed"] - df["rightSpeed"]).values
-    time = df["time"].values
-    
-    regression_y_ave = diff.mean()
-    regression_x_ave = time.mean()
-
-    ar_Num = ((time - regression_x_ave) * (diff - regression_y_ave)).sum()
-    ar_Den = ((time - regression_x_ave) ** 2).sum()
-
-    regression_a = ar_Num / ar_Den if ar_Den != 0 else 0
-    regression_b = regression_y_ave - regression_a * regression_x_ave
-    
-    # 回帰直線を計算
-    regression_line = regression_a * time + regression_b
-    
-    # グラフに回帰直線を追加
-    fig_diff = go.Figure()
-    
-    fig_diff.add_trace(
-        go.Scatter(x=time, y=diff, name="実測値", mode="lines")
-    )
-    
-    fig_diff.add_trace(
-        go.Scatter(x=time, y=regression_line, name="回帰直線", mode="lines",
-                   line=dict(dash="dash", color="red"))
-    )
-    
-    fig_diff.update_layout(
-        title="左右速度差の推移",
-        xaxis_title="時間",
-        yaxis_title="速度差",
-        hovermode="x unified"
-    )
-    
-    st.plotly_chart(fig_diff, use_container_width=True)
-
-
-    st.header("ゲイン提案")
-
-    lkp, lki, lkd = suggest_gain(
-        left_result,
-        kp_l,
-        ki_l,
-        kd_l,
-        target_val
-    )
-
-    rkp, rki, rkd = suggest_gain(
-        right_result,
-        kp_r,
-        ki_r,
-        kd_r,
-        target_val
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("左モーター")
-        st.write(f"Kp: {lkp}")
-        st.write(f"Ki: {lki}")
-        st.write(f"Kd: {lkd}")
-        for a in create_advice(left_result, target_val):
-            st.write("- " + a)
-
-    with col2:
-        st.subheader("右モーター")
-        st.write(f"Kp: {rkp}")
-        st.write(f"Ki: {rki}")
-        st.write(f"Kd: {rkd}")
-        for a in create_advice(right_result, target_val):
-            st.write("- " + a)
-
-    st.header("波形表示")
-
-    fig = make_subplots(
-        rows=2,
-        cols=2,
-        subplot_titles=(
-            "Left Speed",
-            "Right Speed",
-            "Left Power",
-            "Right Power"
+        left_result = analyze_wave(
+            df["time"].values,
+            df["leftSpeed"].values,
+            df["leftPower"].values,
+            target_val
         )
-    )
 
-    fig.add_trace(
-        go.Scatter(x=df["time"], y=df["leftSpeed"]),
-        row=1, col=1
-    )
+        right_result = analyze_wave(
+            df["time"].values,
+            df["rightSpeed"].values,
+            df["rightPower"].values,
+            target_val
+        )
 
-    fig.add_trace(
-        go.Scatter(x=df["time"], y=df["rightSpeed"]),
-        row=1, col=2
-    )
+        left_score = calculate_score(left_result, target_val)
+        right_score = calculate_score(right_result, target_val)
 
-    fig.add_trace(
-        go.Scatter(x=df["time"], y=df["leftPower"]),
-        row=2, col=1
-    )
+        st.header("評価スコア")
 
-    fig.add_trace(
-        go.Scatter(x=df["time"], y=df["rightPower"]),
-        row=2, col=2
-    )
+        c1, c2 = st.columns(2)
 
-    # ターゲット値の横線を追加
-    fig.add_hline(y=target_val, line_dash="dash", line_color="red",
-                  row=1, col=1, annotation_text="Target", annotation_position="right")
-    
-    fig.add_hline(y=target_val, line_dash="dash", line_color="red",
-                  row=1, col=2, annotation_text="Target", annotation_position="right")
+        c1.metric("左スコア", f"{left_score:.1f}")
+        c2.metric("右スコア", f"{right_score:.1f}")
 
-    st.plotly_chart(fig, use_container_width=True)
+        st.header("解析結果")
 
-    if st.button("調整履歴を保存"):
-        row = pd.DataFrame([{
-            "datetime": datetime.now(),
-            "kp_l": kp_l,
-            "ki_l": ki_l,
-            "kd_l": kd_l,
-            "kp_r": kp_r,
-            "ki_r": ki_r,
-            "kd_r": kd_r,
-            "score_l": left_score,
-            "score_r": right_score
-        }])
+        metrics = pd.DataFrame({
+            "項目": [
+                "最大速度",
+                "オーバーシュート[%]",
+                "定常偏差",
+                "立上り時間",
+                "標準偏差",
+                "ハンチング周期",
+                "Power飽和率[%]"
+            ],
+            "左": [
+                left_result["max_speed"],
+                left_result["overshoot"],
+                left_result["steady_error"],
+                left_result["rise_time"],
+                left_result["stable_std"],
+                left_result["hunting_cycles"],
+                left_result["saturation_ratio"]
+            ],
+            "右": [
+                right_result["max_speed"],
+                right_result["overshoot"],
+                right_result["steady_error"],
+                right_result["rise_time"],
+                right_result["stable_std"],
+                right_result["hunting_cycles"],
+                right_result["saturation_ratio"]
+            ]
+        })
+
+        st.dataframe(metrics, use_container_width=True)
+
+        st.header("左右差分析")
+
+        left_avg = df["leftSpeed"].mean()
+        right_avg = df["rightSpeed"].mean()
+
+        diff_ratio = abs(left_avg - right_avg) / target_val * 100
+
+        if diff_ratio > 5:
+            if left_avg < right_avg:
+                st.warning(f"左モーターが {diff_ratio:.1f}% 遅いです")
+            else:
+                st.warning(f"右モーターが {diff_ratio:.1f}% 遅いです")
+        else:
+            st.success("左右差は小さいです")
+
+        # 回帰直線の計算
+        diff = (df["leftSpeed"] - df["rightSpeed"]).values
+        time = df["time"].values
+        
+        regression_y_ave = diff.mean()
+        regression_x_ave = time.mean()
+
+        ar_Num = ((time - regression_x_ave) * (diff - regression_y_ave)).sum()
+        ar_Den = ((time - regression_x_ave) ** 2).sum()
+
+        regression_a = ar_Num / ar_Den if ar_Den != 0 else 0
+        regression_b = regression_y_ave - regression_a * regression_x_ave
+        
+        # 回帰直線を計算
+        regression_line = regression_a * time + regression_b
+        
+        # グラフに回帰直線を追加
+        fig_diff = go.Figure()
+        
+        fig_diff.add_trace(
+            go.Scatter(x=time, y=diff, name="実測値", mode="lines")
+        )
+        
+        fig_diff.add_trace(
+            go.Scatter(x=time, y=regression_line, name="回帰直線", mode="lines",
+                       line=dict(dash="dash", color="red"))
+        )
+        
+        fig_diff.update_layout(
+            title="左右速度差の推移",
+            xaxis_title="時間",
+            yaxis_title="速度差",
+            hovermode="x unified"
+        )
+        
+        st.plotly_chart(fig_diff, use_container_width=True)
+
+
+        st.header("ゲイン提案")
+
+        lkp, lki, lkd = suggest_gain(
+            left_result,
+            kp_l,
+            ki_l,
+            kd_l,
+            target_val
+        )
+
+        rkp, rki, rkd = suggest_gain(
+            right_result,
+            kp_r,
+            ki_r,
+            kd_r,
+            target_val
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("左モーター")
+            st.write(f"Kp: {lkp}")
+            st.write(f"Ki: {lki}")
+            st.write(f"Kd: {lkd}")
+            for a in create_advice(left_result, target_val):
+                st.write("- " + a)
+
+        with col2:
+            st.subheader("右モーター")
+            st.write(f"Kp: {rkp}")
+            st.write(f"Ki: {rki}")
+            st.write(f"Kd: {rkd}")
+            for a in create_advice(right_result, target_val):
+                st.write("- " + a)
+
+        st.header("波形表示")
+
+        fig = make_subplots(
+            rows=2,
+            cols=2,
+            subplot_titles=(
+                "Left Speed",
+                "Right Speed",
+                "Left Power",
+                "Right Power"
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(x=df["time"], y=df["leftSpeed"]),
+            row=1, col=1
+        )
+
+        fig.add_trace(
+            go.Scatter(x=df["time"], y=df["rightSpeed"]),
+            row=1, col=2
+        )
+
+        fig.add_trace(
+            go.Scatter(x=df["time"], y=df["leftPower"]),
+            row=2, col=1
+        )
+
+        fig.add_trace(
+            go.Scatter(x=df["time"], y=df["rightPower"]),
+            row=2, col=2
+        )
+
+        # ターゲット値の横線を追加
+        fig.add_hline(y=target_val, line_dash="dash", line_color="red",
+                      row=1, col=1, annotation_text="Target", annotation_position="right")
+        
+        fig.add_hline(y=target_val, line_dash="dash", line_color="red",
+                      row=1, col=2, annotation_text="Target", annotation_position="right")
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        if st.button("調整履歴を保存"):
+            row = pd.DataFrame([{
+                "datetime": datetime.now(),
+                "kp_l": kp_l,
+                "ki_l": ki_l,
+                "kd_l": kd_l,
+                "kp_r": kp_r,
+                "ki_r": ki_r,
+                "kd_r": kd_r,
+                "score_l": left_score,
+                "score_r": right_score
+            }])
+
+            if os.path.exists(HISTORY_FILE):
+                history = pd.read_csv(HISTORY_FILE)
+                history = pd.concat([history, row])
+            else:
+                history = row
+
+            history.to_csv(HISTORY_FILE, index=False)
+            st.success("履歴保存完了")
 
         if os.path.exists(HISTORY_FILE):
+            st.header("調整履歴")
             history = pd.read_csv(HISTORY_FILE)
-            history = pd.concat([history, row])
-        else:
-            history = row
+            st.dataframe(history, use_container_width=True)
 
-        history.to_csv(HISTORY_FILE, index=False)
-        st.success("履歴保存完了")
+            fig_history = go.Figure()
 
-    if os.path.exists(HISTORY_FILE):
-        st.header("調整履歴")
-        history = pd.read_csv(HISTORY_FILE)
-        st.dataframe(history, use_container_width=True)
-
-        fig_history = go.Figure()
-
-        fig_history.add_trace(
-            go.Scatter(
-                y=history["score_l"],
-                name="Left Score"
+            fig_history.add_trace(
+                go.Scatter(
+                    y=history["score_l"],
+                    name="Left Score"
+                )
             )
-        )
 
-        fig_history.add_trace(
-            go.Scatter(
-                y=history["score_r"],
-                name="Right Score"
+            fig_history.add_trace(
+                go.Scatter(
+                    y=history["score_r"],
+                    name="Right Score"
+                )
             )
-        )
 
-        st.plotly_chart(
-            fig_history,
-            use_container_width=True
-        )
+            st.plotly_chart(
+                fig_history,
+                use_container_width=True
+            )
+
+with tab_video:
+    st.header(" 動画解析")
+    st.info("動画解析機能は開発中です。")
