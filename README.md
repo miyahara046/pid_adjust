@@ -56,7 +56,12 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 3.必要なライブラリのインストール
 
 ```shell
-pip install streamlit pandas plotly
+pip install -r requirements.txt
+```
+
+scipyのバージョンで怒られたときは
+```shell
+ pip install scipy --upgrade
 ```
 
 4.アプリケーションの起動
@@ -64,6 +69,8 @@ pip install streamlit pandas plotly
 ```shell
 streamlit run app.py
 ```
+
+最初、起動時にEmailアドレスを聞かれるが入れずにEnterで大丈夫！！
 
 ## 使用方法
 
