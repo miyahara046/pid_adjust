@@ -283,7 +283,43 @@ if uploaded_file is not None:
     else:
         st.success("左右差は小さいです")
 
-    st.line_chart(df["leftSpeed"] - df["rightSpeed"])
+    # 回帰直線の計算
+    diff = (df["leftSpeed"] - df["rightSpeed"]).values
+    time = df["time"].values
+    
+    regression_y_ave = diff.mean()
+    regression_x_ave = time.mean()
+
+    ar_Num = ((time - regression_x_ave) * (diff - regression_y_ave)).sum()
+    ar_Den = ((time - regression_x_ave) ** 2).sum()
+
+    regression_a = ar_Num / ar_Den if ar_Den != 0 else 0
+    regression_b = regression_y_ave - regression_a * regression_x_ave
+    
+    # 回帰直線を計算
+    regression_line = regression_a * time + regression_b
+    
+    # グラフに回帰直線を追加
+    fig_diff = go.Figure()
+    
+    fig_diff.add_trace(
+        go.Scatter(x=time, y=diff, name="実測値", mode="lines")
+    )
+    
+    fig_diff.add_trace(
+        go.Scatter(x=time, y=regression_line, name="回帰直線", mode="lines",
+                   line=dict(dash="dash", color="red"))
+    )
+    
+    fig_diff.update_layout(
+        title="左右速度差の推移",
+        xaxis_title="時間",
+        yaxis_title="速度差",
+        hovermode="x unified"
+    )
+    
+    st.plotly_chart(fig_diff, use_container_width=True)
+
 
     st.header("ゲイン提案")
 
@@ -353,6 +389,13 @@ if uploaded_file is not None:
         go.Scatter(x=df["time"], y=df["rightPower"]),
         row=2, col=2
     )
+
+    # ターゲット値の横線を追加
+    fig.add_hline(y=target_val, line_dash="dash", line_color="red",
+                  row=1, col=1, annotation_text="Target", annotation_position="right")
+    
+    fig.add_hline(y=target_val, line_dash="dash", line_color="red",
+                  row=1, col=2, annotation_text="Target", annotation_position="right")
 
     st.plotly_chart(fig, use_container_width=True)
 
