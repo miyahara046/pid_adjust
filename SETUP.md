@@ -23,19 +23,19 @@ python api.py
 ### シンプルな使い方
 
 ```bash
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze
+curl.exe -X POST -F "file=@data.csv" http://localhost:8000/analyze
 ```
 
 ### ターゲット値を指定
 
 ```bash
-curl -X POST -F "file=@data.csv" -F "target_val=600" http://localhost:8000/analyze
+curl.exe -X POST -F "file=@data.csv" -F "target_val=600" http://localhost:8000/analyze
 ```
 
 ### 全パラメータを指定
 
 ```bash
-curl -X POST \
+curl.exe -X POST \
   -F "file=@data.csv" \
   -F "target_val=500" \
   -F "kp_l=1.0" \
@@ -50,19 +50,19 @@ curl -X POST \
 ### 結果をJSONで整形表示（PowerShell）
 
 ```powershell
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze | ConvertFrom-Json | ConvertTo-Json
+curl.exe -X POST -F "file=@data.csv" http://localhost:8000/analyze | ConvertFrom-Json | ConvertTo-Json
 ```
 
 ### 結果をJSONで整形表示（Linux/Mac）
 
 ```bash
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze | python -m json.tool
+curl.exe -X POST -F "file=@data.csv" http://localhost:8000/analyze | python -m json.tool
 ```
 
 ### 結果をファイルに保存
 
 ```bash
-curl -X POST -F "file=@data.csv" http://localhost:8000/analyze > result.json
+curl.exe -X POST -F "file=@data.csv" http://localhost:8000/analyze > result.json
 ```
 
 ---
