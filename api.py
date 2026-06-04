@@ -3,7 +3,9 @@ from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 import json
 import io
 import os
-from analyzer import analyze_csv
+import zipfile
+import shutil
+from analyzer import analyze_csv, images_to_video, create_mock_runs
 import uvicorn
 from datetime import datetime
 
@@ -12,6 +14,17 @@ app = FastAPI(title="モーター調整補助APIサーバー")
 # 結果を保存するディレクトリ
 RESULTS_DIR = "analysis_results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# 画像ランを保存するディレクトリ
+IMAGE_RUNS_DIR = "image_runs"
+os.makedirs(IMAGE_RUNS_DIR, exist_ok=True)
+
+# モック走行データの生成
+try:
+    create_mock_runs()
+except Exception as e:
+    print(f"モック走行データの生成エラー: {e}")
+
 
 def save_result(result, timestamp_key):
     """解析結果をJSONファイルに保存"""
@@ -331,6 +344,36 @@ def generate_dashboard_html(results_list=None):
             </div>
         """
     
+    # 画像ランの一覧を取得
+    video_runs_html = ""
+    try:
+        runs_list = []
+        if os.path.exists(IMAGE_RUNS_DIR):
+            for item in sorted(os.listdir(IMAGE_RUNS_DIR)):
+                item_path = os.path.join(IMAGE_RUNS_DIR, item)
+                if os.path.isdir(item_path):
+                    img_exts = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+                    imgs = [f for f in os.listdir(item_path) if f.lower().endswith(img_exts)]
+                    has_vid = os.path.exists(os.path.join(item_path, "video.mp4"))
+                    runs_list.append((item, len(imgs), has_vid))
+        
+        if runs_list:
+            video_runs_html += '<div class="metric-card" style="grid-column: 1 / -1; margin-top: 20px;">'
+            video_runs_html += '<h2>🎥 走行動画解析（サーバー側データ一覧）</h2>'
+            video_runs_html += '<table style="width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left;">'
+            video_runs_html += '<tr style="background: #f0f4ff;"><th style="padding: 12px; border-bottom: 2px solid #ddd;">走行ディレクトリ名</th><th style="padding: 12px; border-bottom: 2px solid #ddd;">検出画像数</th><th style="padding: 12px; border-bottom: 2px solid #ddd;">ステータス</th><th style="padding: 12px; border-bottom: 2px solid #ddd;">動画操作</th></tr>'
+            for run, count, has_vid in runs_list:
+                status_str = '<span class="status-good" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: normal;">生成済み</span>' if has_vid else '<span class="status-warning" style="background: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: normal;">未生成</span>'
+                action_str = f'<a href="/video/runs/{run}/video" target="_blank" style="color: #667eea; text-decoration: none; font-weight: bold; border: 1px solid #667eea; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; background: white;">📥 再生 / DL</a>' if has_vid else '<span style="color: #999;">-</span>'
+                video_runs_html += f'<tr><td style="padding: 12px; border-bottom: 1px solid #eee;"><code>{run}</code></td><td style="padding: 12px; border-bottom: 1px solid #eee;">{count} 枚</td><td style="padding: 12px; border-bottom: 1px solid #eee;">{status_str}</td><td style="padding: 12px; border-bottom: 1px solid #eee;">{action_str}</td></tr>'
+            video_runs_html += '</table></div>'
+        else:
+            video_runs_html += '<div class="metric-card" style="grid-column: 1 / -1; margin-top: 20px;"><h2>🎥 走行動画解析</h2><p>画像データがありません。</p></div>'
+    except Exception as e:
+        video_runs_html += f'<div class="metric-card" style="grid-column: 1 / -1; margin-top: 20px;"><h2>🎥 走行動画解析</h2><p>読み込みエラー: {str(e)}</p></div>'
+        
+    html += video_runs_html
+    
     html += """
             <div class="footer">
                 <p>このダッシュボードは FastAPI サーバーから自動生成されています</p>
@@ -445,5 +488,146 @@ async def get_result_json(timestamp_key: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"JSONファイル読み込みエラー: {str(e)}")
 
+@app.get("/video/runs")
+async def get_video_runs():
+    """画像ランディレクトリの一覧を取得"""
+    runs = []
+    if not os.path.exists(IMAGE_RUNS_DIR):
+        return runs
+        
+    try:
+        for item in sorted(os.listdir(IMAGE_RUNS_DIR)):
+            item_path = os.path.join(IMAGE_RUNS_DIR, item)
+            if os.path.isdir(item_path):
+                # 画像ファイル数をカウント
+                img_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+                images = [f for f in os.listdir(item_path) if f.lower().endswith(img_extensions)]
+                
+                # 動画ファイルの存在チェック
+                video_path = os.path.join(item_path, "video.mp4")
+                has_video = os.path.exists(video_path)
+                
+                runs.append({
+                    "run_name": item,
+                    "image_count": len(images),
+                    "has_video": has_video,
+                    "video_url": f"/video/runs/{item}/video" if has_video else None
+                })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"画像ラン一覧の取得エラー: {str(e)}")
+        
+    return runs
+
+@app.post("/video/upload")
+async def upload_video_run(file: UploadFile = File(...), run_name: str = Form(None)):
+    """画像のZIPファイルをアップロードして展開"""
+    if not file.filename.endswith('.zip'):
+        raise HTTPException(status_code=400, detail="ZIPファイルのみアップロード可能です。")
+        
+    # run_name が未指定の場合はタイムスタンプを使用
+    if not run_name:
+        run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+    run_dir = os.path.join(IMAGE_RUNS_DIR, run_name)
+    if os.path.exists(run_dir):
+        # 既存フォルダは削除して上書き
+        shutil.rmtree(run_dir)
+        
+    os.makedirs(run_dir, exist_ok=True)
+    
+    try:
+        contents = await file.read()
+        zip_data = io.BytesIO(contents)
+        with zipfile.ZipFile(zip_data) as zip_ref:
+            for zip_info in zip_ref.infolist():
+                if zip_info.is_dir():
+                    continue
+                filename = os.path.basename(zip_info.filename)
+                if not filename:
+                    continue
+                # 画像ファイルのみを展開
+                img_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+                if filename.lower().endswith(img_extensions):
+                    target_path = os.path.join(run_dir, filename)
+                    with zip_ref.open(zip_info) as source, open(target_path, "wb") as target:
+                        shutil.copyfileobj(source, target)
+                        
+        # 画像が展開されたか確認
+        img_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+        images = [f for f in os.listdir(run_dir) if f.lower().endswith(img_extensions)]
+        if not images:
+            shutil.rmtree(run_dir)
+            raise HTTPException(status_code=400, detail="ZIPファイル内に画像ファイルが見つかりません。")
+            
+        return {
+            "status": "success",
+            "run_name": run_name,
+            "image_count": len(images)
+        }
+    except zipfile.BadZipFile:
+        if os.path.exists(run_dir):
+            shutil.rmtree(run_dir)
+        raise HTTPException(status_code=400, detail="不正なZIPファイルです。")
+    except Exception as e:
+        if os.path.exists(run_dir):
+            shutil.rmtree(run_dir)
+        raise HTTPException(status_code=500, detail=f"アップロード処理エラー: {str(e)}")
+
+@app.post("/video/runs/{run_name}/generate")
+async def generate_video(run_name: str, fps: int = Form(10)):
+    """指定されたランの画像から動画を生成"""
+    run_dir = os.path.join(IMAGE_RUNS_DIR, run_name)
+    if not os.path.exists(run_dir) or not os.path.isdir(run_dir):
+        raise HTTPException(status_code=404, detail="指定されたディレクトリが見つかりません。")
+        
+    video_path = os.path.join(run_dir, "video.mp4")
+    
+    # 既存の動画ファイルがある場合は削除
+    if os.path.exists(video_path):
+        try:
+            os.remove(video_path)
+        except:
+            pass
+            
+    try:
+        # 画像から動画への変換を実行
+        images_to_video(run_dir, video_path, fps=fps)
+        return {
+            "status": "success",
+            "run_name": run_name,
+            "video_url": f"/video/runs/{run_name}/video"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"動画生成エラー: {str(e)}")
+
+@app.get("/video/runs/{run_name}/video")
+async def get_video(run_name: str):
+    """生成された動画ファイルのダウンロード/ストリーミング"""
+    video_path = os.path.join(IMAGE_RUNS_DIR, run_name, "video.mp4")
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="動画ファイルが見つかりません。動画を生成してください。")
+        
+    return FileResponse(
+        video_path,
+        media_type="video/mp4",
+        filename=f"{run_name}_video.mp4"
+    )
+
+@app.delete("/video/runs/{run_name}")
+async def delete_video_run(run_name: str):
+    """画像ランディレクトリ全体の削除"""
+    run_dir = os.path.join(IMAGE_RUNS_DIR, run_name)
+    if not os.path.exists(run_dir):
+        raise HTTPException(status_code=404, detail="指定されたデータが見つかりません。")
+        
+    try:
+        shutil.rmtree(run_dir)
+        return {"status": "success", "message": f"{run_name} を削除しました。"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"削除エラー: {str(e)}")
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

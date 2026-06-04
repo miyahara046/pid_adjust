@@ -222,3 +222,211 @@ def analyze_csv(csv_data, target_val, kp_l, ki_l, kd_l, kp_r, ki_r, kd_r):
             "regression_b": float(regression_b)
         }
     }
+
+def images_to_video(image_dir, output_path, fps=10):
+    """
+    指定されたディレクトリ内の画像をつなぎ合わせて動画（MP4）を作成します。
+    """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError("opencv-python がインストールされていません。'pip install -r requirements.txt' を実行してインストールしてください。")
+        
+    import os
+    import re
+    import glob
+    
+    # 画像ファイルを探す
+    extensions = ('*.png', '*.jpg', '*.jpeg', '*.PNG', '*.JPG', '*.JPEG')
+    image_files = []
+    for ext in extensions:
+        image_files.extend(glob.glob(os.path.join(image_dir, ext)))
+        
+    if not image_files:
+        raise ValueError("指定されたディレクトリに画像ファイルが見つかりません。")
+        
+    # 自然順（数値の順序）でソート
+    def natural_sort_key(s):
+        return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+        
+    image_files.sort(key=natural_sort_key)
+    
+    # 最初の画像からサイズを取得
+    first_image = cv2.imread(image_files[0])
+    if first_image is None:
+        raise ValueError(f"画像を読み込めませんでした: {image_files[0]}")
+        
+    height, width, layers = first_image.shape
+    size = (width, height)
+    
+    # VideoWriterの初期化 (MP4V形式)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, size)
+    
+    try:
+        for filename in image_files:
+            img = cv2.imread(filename)
+            if img is not None:
+                # リサイズが必要な場合はサイズを合わせる
+                if img.shape[1] != width or img.shape[0] != height:
+                    img = cv2.resize(img, size)
+                out.write(img)
+    finally:
+        out.release()
+        
+    return output_path
+
+def create_mock_runs():
+    """
+    デモ用の画像ディレクトリを作成します（走行画像データのシミュレーション）。
+    """
+    import os
+    import math
+    from PIL import Image, ImageDraw, ImageFont
+
+    RUNS_DIR = "image_runs"
+    if os.path.exists(RUNS_DIR) and len(os.listdir(RUNS_DIR)) > 0:
+        return
+
+    os.makedirs(RUNS_DIR, exist_ok=True)
+    
+    # 共通フォントの取得
+    try:
+        font = ImageFont.truetype("arial.ttf", 16)
+        font_large = ImageFont.truetype("arial.ttf", 20)
+    except IOError:
+        font = ImageFont.load_default()
+        font_large = ImageFont.load_default()
+
+    # ---- 1. 加速走行（正常・安定） ----
+    run_1_dir = os.path.join(RUNS_DIR, "sample_run_1_acceleration")
+    os.makedirs(run_1_dir, exist_ok=True)
+    
+    width, height = 640, 480
+    frames = 40
+    speeds_1 = []
+    
+    for i in range(frames):
+        img = Image.new("RGB", (width, height), color=(18, 18, 24))
+        draw = ImageDraw.Draw(img)
+        
+        # グリッド線
+        for x in range(0, width, 40):
+            draw.line([(x, 0), (x, height)], fill=(30, 30, 40), width=1)
+        for y in range(0, height, 40):
+            draw.line([(0, y), (width, y)], fill=(30, 30, 40), width=1)
+            
+        # テレメトリ枠
+        draw.rectangle([(10, 10), (630, 70)], outline=(50, 50, 70), width=2, fill=(25, 25, 35))
+        
+        draw.text((25, 20), "TELEMETRY: RUN_1 (ACCELERATION)", fill=(102, 126, 234), font=font_large)
+        draw.text((25, 45), f"Frame: {i:02d} / {frames-1}   |   Time: {i*0.1:.1f}s", fill=(150, 150, 150), font=font)
+        
+        progress = i / (frames - 1)
+        # PID的な立ち上がり速度の計算 (target=500, Kpが効いてスムーズに収束)
+        speed = 500.0 * (1.0 - math.exp(-i / 6.0))
+        # わずかなノイズを追加
+        speed += (i % 3 - 1) * 2.0
+        speeds_1.append(speed)
+        
+        # 車輪の描画
+        cx = 120 + int(400 * progress)
+        cy = 200
+        radius = 45
+        # 外輪
+        draw.ellipse([(cx - radius, cy - radius), (cx + radius, cy + radius)], outline=(255, 255, 255), width=3)
+        # スポーク
+        angle = progress * 6.0 * math.pi # 3回転
+        sx = cx + int(radius * math.cos(angle))
+        sy = cy + int(radius * math.sin(angle))
+        draw.line([(cx, cy), (sx, sy)], fill=(102, 126, 234), width=4)
+        
+        # 速度テキスト
+        draw.text((cx - 45, cy + radius + 10), f"Speed: {speed:.1f}", fill=(245, 158, 11), font=font)
+        
+        # リアルタイムグラフの描画枠
+        graph_left, graph_top = 50, 300
+        graph_width, graph_height = 540, 120
+        draw.rectangle([(graph_left, graph_top), (graph_left + graph_width, graph_top + graph_height)], outline=(60, 60, 80), width=1, fill=(20, 20, 28))
+        draw.text((graph_left + 10, graph_top + 5), "Real-time Speed Plot (Target: 500)", fill=(100, 100, 120), font=font)
+        
+        # ターゲットライン
+        target_y = graph_top + graph_height - int((500.0 / 600.0) * graph_height)
+        draw.line([(graph_left, target_y), (graph_left + graph_width, target_y)], fill=(239, 68, 68), width=1)
+        
+        # グラフのプロット
+        points = []
+        for idx, s in enumerate(speeds_1):
+            px = graph_left + int(idx * (graph_width / (frames - 1)))
+            py = graph_top + graph_height - int((s / 600.0) * graph_height)
+            points.append((px, py))
+            
+        if len(points) > 1:
+            draw.line(points, fill=(16, 185, 129), width=3)
+            
+        img.save(os.path.join(run_1_dir, f"frame_{i:02d}.png"))
+
+    # ---- 2. 不安定なハンチング走行 ----
+    run_2_dir = os.path.join(RUNS_DIR, "sample_run_2_hunting")
+    os.makedirs(run_2_dir, exist_ok=True)
+    
+    speeds_2 = []
+    for i in range(frames):
+        img = Image.new("RGB", (width, height), color=(18, 18, 24))
+        draw = ImageDraw.Draw(img)
+        
+        # グリッド線
+        for x in range(0, width, 40):
+            draw.line([(x, 0), (x, height)], fill=(30, 30, 40), width=1)
+        for y in range(0, height, 40):
+            draw.line([(0, y), (width, y)], fill=(30, 30, 40), width=1)
+            
+        # テレメトリ枠
+        draw.rectangle([(10, 10), (630, 70)], outline=(70, 50, 50), width=2, fill=(35, 25, 25))
+        
+        draw.text((25, 20), "TELEMETRY: RUN_2 (UNSTABLE HUNTING)", fill=(239, 68, 68), font=font_large)
+        draw.text((25, 45), f"Frame: {i:02d} / {frames-1}   |   Time: {i*0.1:.1f}s", fill=(150, 150, 150), font=font)
+        
+        progress = i / (frames - 1)
+        # ハンチング（振動）する速度の計算
+        oscillation = math.sin(i * 0.8) * 80.0
+        speed = 500.0 * (1.0 - math.exp(-i / 4.0)) + oscillation
+        speeds_2.append(speed)
+        
+        # 車輪の描画
+        cx = 120 + int(400 * progress)
+        cy = 200 + int(oscillation * 0.5)
+        radius = 45
+        # 外輪
+        draw.ellipse([(cx - radius, cy - radius), (cx + radius, cy + radius)], outline=(239, 68, 68), width=3)
+        # スポーク
+        angle = progress * 8.0 * math.pi
+        sx = cx + int(radius * math.cos(angle))
+        sy = cy + int(radius * math.sin(angle))
+        draw.line([(cx, cy), (sx, sy)], fill=(239, 68, 68), width=4)
+        
+        # 速度テキスト
+        draw.text((cx - 45, cy + radius + 10), f"Speed: {speed:.1f}", fill=(239, 68, 68), font=font)
+        
+        # リアルタイムグラフの描画枠
+        graph_left, graph_top = 50, 300
+        graph_width, graph_height = 540, 120
+        draw.rectangle([(graph_left, graph_top), (graph_left + graph_width, graph_top + graph_height)], outline=(80, 60, 60), width=1, fill=(28, 20, 20))
+        draw.text((graph_left + 10, graph_top + 5), "Real-time Speed Plot (Target: 500)", fill=(120, 100, 100), font=font)
+        
+        # ターゲットライン
+        target_y = graph_top + graph_height - int((500.0 / 600.0) * graph_height)
+        draw.line([(graph_left, target_y), (graph_left + graph_width, target_y)], fill=(239, 68, 68), width=1)
+        
+        # グラフのプロット
+        points = []
+        for idx, s in enumerate(speeds_2):
+            px = graph_left + int(idx * (graph_width / (frames - 1)))
+            py = graph_top + graph_height - int((s / 600.0) * graph_height)
+            points.append((px, py))
+            
+        if len(points) > 1:
+            draw.line(points, fill=(239, 68, 68), width=3)
+            
+        img.save(os.path.join(run_2_dir, f"frame_{i:02d}.png"))
+

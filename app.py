@@ -4,10 +4,20 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 import os
+import zipfile
+import shutil
 from datetime import datetime
 from scipy.signal import find_peaks
 import requests
 import io
+from analyzer import images_to_video, create_mock_runs
+
+# モックデータの初期化（ローカルモード用）
+try:
+    create_mock_runs()
+except Exception as e:
+    pass
+
 
 def fetch_results(api_url):
     try:
@@ -26,6 +36,61 @@ def fetch_result_csv(api_url, timestamp_key):
     except Exception:
         pass
     return None
+
+def fetch_video_runs(api_url):
+    try:
+        response = requests.get(f"{api_url}/video/runs", timeout=3.0)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return []
+
+def generate_video_on_server(api_url, run_name, fps):
+    try:
+        response = requests.post(
+            f"{api_url}/video/runs/{run_name}/generate",
+            data={"fps": fps},
+            timeout=30.0
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            try:
+                err_detail = response.json().get("detail", "不明なエラー")
+            except:
+                err_detail = response.text
+            st.error(f"動画生成失敗: {err_detail}")
+    except Exception as e:
+        st.error(f"サーバー動画生成エラー: {e}")
+    return None
+
+def upload_zip_to_server(api_url, zip_file_bytes, run_name):
+    try:
+        files = {"file": ("images.zip", zip_file_bytes, "application/zip")}
+        data = {"run_name": run_name} if run_name else {}
+        response = requests.post(f"{api_url}/video/upload", files=files, data=data, timeout=30.0)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            try:
+                err_detail = response.json().get("detail", "不明なエラー")
+            except:
+                err_detail = response.text
+            st.error(f"アップロード失敗: {err_detail}")
+    except Exception as e:
+        st.error(f"サーバーアップロードエラー: {e}")
+    return None
+
+def delete_run_on_server(api_url, run_name):
+    try:
+        response = requests.delete(f"{api_url}/video/runs/{run_name}", timeout=5.0)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        st.error(f"サーバー削除エラー: {e}")
+    return None
+
 
 def detect_hunting(speed, target):
     speed = np.array(speed)
@@ -567,5 +632,213 @@ with tab_csv:
             )
 
 with tab_video:
-    st.header(" 動画解析")
-    st.info("動画解析機能は開発中です。")
+    st.header("🎥 動画解析 (画像から動画の生成・再生・ダウンロード)")
+    st.caption("走行画像シーケンス（PNG/JPG）を結合して動画（MP4）を作成します。再生およびダウンロードが可能です。")
+
+    if data_source == "ローカルCSVファイルをアップロード":
+        st.subheader("📁 ローカルモード")
+        
+        # 1. 走行ディレクトリの選択
+        local_runs_dir = "image_runs"
+        available_local_runs = []
+        if os.path.exists(local_runs_dir):
+            available_local_runs = [d for d in os.listdir(local_runs_dir) if os.path.isdir(os.path.join(local_runs_dir, d))]
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.write("### 走行フォルダの指定")
+            selected_local_run = st.selectbox(
+                "利用可能なローカル画像ディレクトリ",
+                options=available_local_runs,
+                help="image_runs ディレクトリ内のフォルダです。"
+            )
+            
+            # 手動パス指定も許可する
+            default_path = ""
+            if selected_local_run:
+                default_path = os.path.abspath(os.path.join(local_runs_dir, selected_local_run))
+            
+            custom_path = st.text_input(
+                "または、画像フォルダの絶対パスを入力してください",
+                value=default_path,
+                help="画像（PNG/JPG/JPEG）が保存されているフォルダを指定してください。"
+            )
+            
+            # 画像ZIPアップロード機能（ローカル展開用）
+            st.markdown("---")
+            st.write("### 走行画像を新規追加 (ZIP)")
+            uploaded_zip = st.file_uploader(
+                "画像を含むZIPファイルをアップロードして展開",
+                type=["zip"],
+                key="local_zip_uploader"
+            )
+            new_run_name = st.text_input("新しい走行名 (アルファベット・数字)", placeholder="run_new_experiment", key="local_run_name")
+            
+            if st.button("ZIPファイルをローカルに展開", use_container_width=True):
+                if uploaded_zip and new_run_name:
+                    target_dir = os.path.join(local_runs_dir, new_run_name)
+                    if os.path.exists(target_dir):
+                        shutil.rmtree(target_dir)
+                    os.makedirs(target_dir, exist_ok=True)
+                    
+                    try:
+                        with zipfile.ZipFile(uploaded_zip) as zip_ref:
+                            # 画像のみを展開
+                            extracted_count = 0
+                            for zip_info in zip_ref.infolist():
+                                if zip_info.is_dir():
+                                    continue
+                                filename = os.path.basename(zip_info.filename)
+                                if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                                    with zip_ref.open(zip_info) as source, open(os.path.join(target_dir, filename), "wb") as target:
+                                        shutil.copyfileobj(source, target)
+                                        extracted_count += 1
+                                        
+                        if extracted_count > 0:
+                            st.success(f"ZIPファイルを展開しました。{extracted_count}枚の画像を {target_dir} に保存しました。")
+                            st.rerun()
+                        else:
+                            shutil.rmtree(target_dir)
+                            st.error("ZIPファイル内に画像ファイル (.png, .jpg, .jpeg) が見つかりませんでした。")
+                    except Exception as e:
+                        if os.path.exists(target_dir):
+                            shutil.rmtree(target_dir)
+                        st.error(f"ZIPファイルの処理エラー: {e}")
+                else:
+                    st.warning("ZIPファイルと新しい走行名を入力してください。")
+            
+        with col2:
+            st.write("### 動画生成と再生")
+            if custom_path and os.path.exists(custom_path) and os.path.isdir(custom_path):
+                img_exts = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+                images = [f for f in os.listdir(custom_path) if f.lower().endswith(img_exts)]
+                st.info(f"📁 選択パス: `{custom_path}`\n\n📷 検出画像数: **{len(images)}** 枚")
+                
+                fps = st.slider("フレームレート (FPS)", min_value=1, max_value=60, value=10, step=1, key="local_fps")
+                video_path = os.path.join(custom_path, "video.mp4")
+                has_video = os.path.exists(video_path)
+                
+                generate_btn = st.button("🎬 動画を生成する", type="primary", use_container_width=True)
+                
+                if generate_btn:
+                    with st.spinner("動画を生成中..."):
+                        try:
+                            images_to_video(custom_path, video_path, fps=fps)
+                            st.success("動画の生成が完了しました！")
+                            has_video = True
+                        except Exception as e:
+                            st.error(f"動画の生成に失敗しました: {e}")
+                
+                if has_video:
+                    st.write("#### 🎥 生成された動画の再生")
+                    try:
+                        with open(video_path, "rb") as vf:
+                            video_bytes = vf.read()
+                        st.video(video_bytes)
+                        st.download_button(
+                            label="📥 動画をダウンロード",
+                            data=video_bytes,
+                            file_name="run_video.mp4",
+                            mime="video/mp4",
+                            use_container_width=True
+                        )
+                    except Exception as e:
+                        st.error(f"動画ファイルの読み込みエラー: {e}")
+            else:
+                st.warning("正しいディレクトリパスを指定してください。")
+                
+    else:  # "サーバーと同期（最新データ）"
+        st.subheader("🌐 サーバー同期モード")
+        
+        # 1. サーバーの走行ディレクトリ一覧を取得
+        server_runs = fetch_video_runs(api_url)
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.write("### サーバー上の走行データ選択")
+            if not server_runs:
+                st.warning("サーバー上に画像データがありません。")
+            else:
+                run_names = [r["run_name"] for r in server_runs]
+                selected_run_name = st.selectbox(
+                    "走行データを選択してください",
+                    options=run_names,
+                    key="server_run_selectbox"
+                )
+                
+                # 選択された走行データの詳細
+                selected_run_info = next((r for r in server_runs if r["run_name"] == selected_run_name), None)
+                if selected_run_info:
+                    st.info(
+                        f"📁 フォルダ名: `{selected_run_info['run_name']}`\n\n"
+                        f"📷 画像数: **{selected_run_info['image_count']}** 枚\n\n"
+                        f"🎬 動画ステータス: {'生成済み' if selected_run_info['has_video'] else '未生成'}"
+                    )
+                    
+                    # 削除ボタン
+                    if st.button("🗑️ この走行データをサーバーから削除", use_container_width=True):
+                        res = delete_run_on_server(api_url, selected_run_name)
+                        if res:
+                            st.success(f"{selected_run_name} を削除しました。")
+                            st.rerun()
+            
+            st.markdown("---")
+            st.write("### 新しい走行データをサーバーにアップロード")
+            uploaded_server_zip = st.file_uploader(
+                "走行画像のZIPファイルをアップロード",
+                type=["zip"],
+                key="server_zip_uploader"
+            )
+            server_run_name = st.text_input("走行名 (省略時は自動生成)", placeholder="run_experiment_1", key="server_run_name")
+            
+            if st.button("🚀 サーバーにアップロードして展開", use_container_width=True):
+                if uploaded_server_zip:
+                    with st.spinner("サーバーに送信中..."):
+                        zip_bytes = uploaded_server_zip.read()
+                        res = upload_zip_to_server(api_url, zip_bytes, server_run_name)
+                        if res:
+                            st.success(f"アップロード成功！ 走行名: {res['run_name']} (画像数: {res['image_count']}枚)")
+                            st.rerun()
+                else:
+                    st.warning("ZIPファイルを選択してください。")
+                    
+        with col2:
+            st.write("### 動画生成と再生")
+            if server_runs and 'selected_run_info' in locals() and selected_run_info:
+                fps = st.slider("フレームレート (FPS)", min_value=1, max_value=60, value=10, step=1, key="server_fps")
+                
+                generate_btn = st.button("🎬 動画を生成する", type="primary", use_container_width=True, key="server_generate_btn")
+                
+                if generate_btn:
+                    with st.spinner("サーバーで動画を生成中..."):
+                        res = generate_video_on_server(api_url, selected_run_info["run_name"], fps)
+                        if res:
+                            st.success("動画の生成が完了しました！")
+                            # 状態を更新するために再読み込み
+                            st.rerun()
+                
+                if selected_run_info["has_video"]:
+                    st.write("#### 🎥 生成された動画の再生")
+                    video_url = f"{api_url}/video/runs/{selected_run_info['run_name']}/video"
+                    st.video(video_url)
+                    
+                    # ダウンロードボタン用にファイルをダウンロード
+                    try:
+                        with st.spinner("ダウンロード用データを準備中..."):
+                            video_resp = requests.get(video_url, timeout=10.0)
+                            if video_resp.status_code == 200:
+                                st.download_button(
+                                    label="📥 動画をダウンロード",
+                                    data=video_resp.content,
+                                    file_name=f"{selected_run_info['run_name']}_video.mp4",
+                                    mime="video/mp4",
+                                    use_container_width=True
+                                )
+                            else:
+                                st.error("動画データの取得に失敗しました。")
+                    except Exception as e:
+                        st.error(f"ダウンロード準備エラー: {e}")
+            else:
+                st.info("走行データを選択すると、動画の生成・再生が行えます。")
