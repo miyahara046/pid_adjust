@@ -11,7 +11,7 @@
 
 ```mermaid
 graph TD
-    A[実機 / シミュレータ] -- curl.exe 送信 --> B(サーバー側: FastAPI)
+    A[実機] -- curl.exe 送信 --> B(サーバー側: FastAPI)
     B -- 結果保存 / 提供 --> C[Webダッシュボード: /dashboard]
     B -- データ提供 --> D(ユーザー側: Streamlit)
     D -- 同期リクエスト --> B
@@ -72,18 +72,6 @@ python api.py
 - サーバーが `http://localhost:8000` で起動します。
 - ブラウザで `http://localhost:8000/dashboard` を開くと、送信されたデータ履歴とスコア推移をグラフィカルに確認できます。
 
-#### コマンドラインからのデータ送信方法 (curl)
-実機の測定が完了した際、以下のコマンドを実行してCSVログをサーバーへ即座に送信・解析させることができます。
-```powershell
-curl.exe -X POST -F "file=@runlog.csv" http://localhost:8000/analyze
-```
-*(※ Windows PowerShellのデフォルトの `curl` はエイリアスになっているため、必ず `curl.exe` と明記して呼び出してください。)*
-
-ターゲット値などのパラメータを指定して送信することも可能です：
-```powershell
-curl.exe -X POST -F "file=@runlog.csv" -F "target_val=600" -F "kp_l=1.2" http://localhost:8000/analyze
-```
-
 ---
 
 ### B. ユーザー側 (Streamlit) の起動
@@ -100,6 +88,18 @@ streamlit run app.py
    FastAPIサーバーと同期し、サーバー上に保存されている過去の測定履歴から選択して、当時のゲイン・ターゲット値等をワンクリックで復元・解析・可視化します。
 
 ---
+
+### 実機側からの送信
+実機の測定が完了した際、以下のコマンドを実行してCSVログをサーバーへ即座に送信・解析させることができます。
+```powershell
+curl.exe -X POST -F "file=@runlog.csv" http://localhost:8000/analyze
+```
+*(※ Windows PowerShellのデフォルトの `curl` はエイリアスになっているため、必ず `curl.exe` と明記して呼び出してください。)*
+
+ターゲット値などのパラメータを指定して送信することも可能です：
+```powershell
+curl.exe -X POST -F "file=@runlog.csv" -F "target_val=600" -F "kp_l=1.2" http://localhost:8000/analyze
+```
 
 ## CSVファイル形式
 
