@@ -13,7 +13,8 @@
 graph TD
     A[実機 / シミュレータ] -- curl.exe 送信 --> B(サーバー側: FastAPI)
     B -- 結果保存 / 提供 --> C[Webダッシュボード: /dashboard]
-    D(ユーザー側: Streamlit) -- 同期リクエスト --> B
+    B -- データ提供 --> D(ユーザー側: Streamlit)
+    D -- 同期リクエスト --> B
     D -- 可視化 / インタラクティブ調整 --> E[Streamlit UI]
 ```
 
