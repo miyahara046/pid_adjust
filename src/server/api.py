@@ -9,16 +9,19 @@ import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from pathlib import Path
+
 from ..analyzer import analyze_csv, create_mock_runs, images_to_video
 
 app = FastAPI(title="モーター調整補助APIサーバー")
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 # 結果を保存するディレクトリ
-RESULTS_DIR = "../../analysis_results"
+RESULTS_DIR = BASE_DIR / "analysis_results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # 画像ランを保存するディレクトリ
-IMAGE_RUNS_DIR = "../../image_runs"
+IMAGE_RUNS_DIR = BASE_DIR / "image_runs"
 os.makedirs(IMAGE_RUNS_DIR, exist_ok=True)
 
 # モック走行データの生成

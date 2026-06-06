@@ -46,7 +46,14 @@ uv を用いた環境を構築します。
    curl -LsSf https://astral.sh/uv/install.sh | sh
 
    # Windows(PowerShell)
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   $powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+   $[Environment]::SetEnvironmentVariable(
+    "Path",
+    [Environment]::GetEnvironmentVariable("Path","User") +
+    ";$env:USERPROFILE\.local\bin",
+    "User"
+   )
    ```
 
    pip 環境があれば、pip からもインストールでまきす。  
@@ -72,9 +79,18 @@ uv を用いた環境を構築します。
 
    ```
    uv venv　# 仮想環境を構築
+   
    source .venv/bin/activate　# 仮想環境をアクティベート
+   .\.venv\Scripts\Activate.ps1　# powershellはこっち！！
    ```
 
+   powershellでエラーが出たら
+   ```
+   Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+   
+   .\.venv\Scripts\Activate.ps1
+   ```
+   
    ターミナルのユーザの左に (pid_adjust) という表記が出ていれば、仮想環境のアクティベート成功。
 
 1. 依存関係の同期
@@ -93,6 +109,8 @@ uv を用いた環境を構築します。
 ＊ サーバー側/ユーザー側問わず、起動の際は、仮想環境をアクティベートする必要があります。
 ```
 source .venv/bin/activate
+
+.\.venv\Scripts\Activate.ps1 #powershellはこっち！！！！
 ```
 
 ### A. サーバー側 (FastAPI) の起動
