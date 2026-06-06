@@ -98,7 +98,7 @@ source .venv/bin/activate
 ### A. サーバー側 (FastAPI) の起動
 
 ```powershell
-python api.py
+uv run -m src.server.api 
 ```
 - サーバーが `http://localhost:8000` で起動します。
 - ブラウザで `http://localhost:8000/dashboard` を開くと、送信されたデータ履歴とスコア推移をグラフィカルに確認できます。
@@ -118,14 +118,18 @@ streamlit run app.py
 
 ### 実機側からの送信
 実機の測定が完了した際、以下のコマンドを実行してCSVログをサーバーへ即座に送信・解析させることができます。
+```
+curl -X POST -F "file=@runlog.csv" http://localhost:8000/analyze
+```
+
+*(※ PowerShell を使用する場合は、PowerShellのデフォルトの `curl` はエイリアスになっているため、必ず `curl.exe` と明記して呼び出してください。)*
 ```powershell
 curl.exe -X POST -F "file=@runlog.csv" http://localhost:8000/analyze
 ```
-*(※ Windows PowerShellのデフォルトの `curl` はエイリアスになっているため、必ず `curl.exe` と明記して呼び出してください。)*
 
-ターゲット値などのパラメータを指定して送信することも可能です：
-```powershell
-curl.exe -X POST -F "file=@runlog.csv" -F "target_val=600" -F "kp_l=1.2" http://localhost:8000/analyze
+ターゲット値などのパラメータを指定して送信することも可能です。
+```
+curl -X POST -F "file=@runlog.csv" -F "target_val=600" -F "kp_l=1.2" http://localhost:8000/analyze
 ```
 
 ---
