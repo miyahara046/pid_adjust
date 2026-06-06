@@ -106,7 +106,7 @@ uv run -m src.server.api
 ### B. ユーザー側 (Streamlit) の起動
 
 ```powershell
-streamlit run app.py
+streamlit run src/app.py
 ```
 - ブラウザが起動し、`http://localhost:8501` に接続されます（初回起動時にEmail入力を求められた場合は、何も入力せずEnterを押してください）。
 
