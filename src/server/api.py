@@ -1,22 +1,24 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
-import json
 import io
+import json
 import os
-import zipfile
 import shutil
-from analyzer import analyze_csv, images_to_video, create_mock_runs
-import uvicorn
+import zipfile
 from datetime import datetime
+
+import uvicorn
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+
+from ..analyzer import analyze_csv, create_mock_runs, images_to_video
 
 app = FastAPI(title="モーター調整補助APIサーバー")
 
 # 結果を保存するディレクトリ
-RESULTS_DIR = "analysis_results"
+RESULTS_DIR = "../../analysis_results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # 画像ランを保存するディレクトリ
-IMAGE_RUNS_DIR = "image_runs"
+IMAGE_RUNS_DIR = "../../image_runs"
 os.makedirs(IMAGE_RUNS_DIR, exist_ok=True)
 
 # モック走行データの生成
@@ -29,33 +31,39 @@ except Exception as e:
 def save_result(result, timestamp_key):
     """解析結果をJSONファイルに保存"""
     filename = f"{RESULTS_DIR}/result_{timestamp_key}.json"
-    with open(filename, 'w', encoding='utf-8') as f:
+    with open(filename, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     return filename
+
 
 def generate_dashboard_html(results_list=None):
     """ダッシュボードHTMLを生成"""
     if results_list is None:
         results_list = []
-    
+
     # 結果ファイルを読み込む
     if not results_list:
         try:
-            result_files = sorted([f for f in os.listdir(RESULTS_DIR) if f.endswith('.json')], reverse=True)
+            result_files = sorted(
+                [f for f in os.listdir(RESULTS_DIR) if f.endswith(".json")],
+                reverse=True,
+            )
             for filename in result_files[-10:]:  # 最新10件
                 try:
-                    with open(os.path.join(RESULTS_DIR, filename), 'r', encoding='utf-8') as f:
+                    with open(
+                        os.path.join(RESULTS_DIR, filename), "r", encoding="utf-8"
+                    ) as f:
                         results_list.append(json.load(f))
                 except:
                     pass
         except:
             pass
-    
+
     # スコア推移データ
-    left_scores = [r['left_motor']['score'] for r in results_list]
-    right_scores = [r['right_motor']['score'] for r in results_list]
-    timestamps = [r['timestamp'][-8:-3] for r in results_list]  # HH:MM形式
-    
+    left_scores = [r["left_motor"]["score"] for r in results_list]
+    right_scores = [r["right_motor"]["score"] for r in results_list]
+    timestamps = [r["timestamp"][-8:-3] for r in results_list]  # HH:MM形式
+
     html = f"""
     <!DOCTYPE html>
     <html lang="ja">
@@ -199,128 +207,137 @@ def generate_dashboard_html(results_list=None):
                 <p>FastAPI サーバーで送信されたデータをリアルタイム表示</p>
             </div>
     """
-    
+
     if results_list:
         latest = results_list[0]
-        left_motor = latest['left_motor']
-        right_motor = latest['right_motor']
-        balance = latest['balance']
-        
+        left_motor = latest["left_motor"]
+        right_motor = latest["right_motor"]
+        balance = latest["balance"]
+
         html += f"""
             <div class="latest-result">
                 <div class="metric-card">
                     <h2>⬅️ 左モーター</h2>
-                    <div class="score">{left_motor['score']:.1f}</div>
+                    <div class="score">{left_motor["score"]:.1f}</div>
                     <div class="metric">
                         <span class="metric-label">最大速度</span>
-                        <span class="metric-value">{left_motor['max_speed']:.2f}</span>
+                        <span class="metric-value">{left_motor["max_speed"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">オーバーシュート</span>
-                        <span class="metric-value">{left_motor['overshoot']:.2f}%</span>
+                        <span class="metric-value">{left_motor["overshoot"]:.2f}%</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">定常偏差</span>
-                        <span class="metric-value">{left_motor['steady_error']:.2f}</span>
+                        <span class="metric-value">{left_motor["steady_error"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">ハンチング周期</span>
-                        <span class="metric-value">{left_motor['hunting_cycles']}</span>
+                        <span class="metric-value">{left_motor["hunting_cycles"]}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">推奨 Kp</span>
-                        <span class="metric-value">{left_motor['suggested_kp']:.2f}</span>
+                        <span class="metric-value">{left_motor["suggested_kp"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">推奨 Ki</span>
-                        <span class="metric-value">{left_motor['suggested_ki']:.2f}</span>
+                        <span class="metric-value">{left_motor["suggested_ki"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">推奨 Kd</span>
-                        <span class="metric-value">{left_motor['suggested_kd']:.2f}</span>
+                        <span class="metric-value">{left_motor["suggested_kd"]:.2f}</span>
                     </div>
                     <div class="advice">
                         <strong>アドバイス:</strong><br>
-                        {'<br>'.join(left_motor['advice'])}
+                        {"<br>".join(left_motor["advice"])}
                     </div>
                 </div>
-                
+
                 <div class="metric-card">
                     <h2>➡️ 右モーター</h2>
-                    <div class="score">{right_motor['score']:.1f}</div>
+                    <div class="score">{right_motor["score"]:.1f}</div>
                     <div class="metric">
                         <span class="metric-label">最大速度</span>
-                        <span class="metric-value">{right_motor['max_speed']:.2f}</span>
+                        <span class="metric-value">{right_motor["max_speed"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">オーバーシュート</span>
-                        <span class="metric-value">{right_motor['overshoot']:.2f}%</span>
+                        <span class="metric-value">{right_motor["overshoot"]:.2f}%</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">定常偏差</span>
-                        <span class="metric-value">{right_motor['steady_error']:.2f}</span>
+                        <span class="metric-value">{right_motor["steady_error"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">ハンチング周期</span>
-                        <span class="metric-value">{right_motor['hunting_cycles']}</span>
+                        <span class="metric-value">{right_motor["hunting_cycles"]}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">推奨 Kp</span>
-                        <span class="metric-value">{right_motor['suggested_kp']:.2f}</span>
+                        <span class="metric-value">{right_motor["suggested_kp"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">推奨 Ki</span>
-                        <span class="metric-value">{right_motor['suggested_ki']:.2f}</span>
+                        <span class="metric-value">{right_motor["suggested_ki"]:.2f}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">推奨 Kd</span>
-                        <span class="metric-value">{right_motor['suggested_kd']:.2f}</span>
+                        <span class="metric-value">{right_motor["suggested_kd"]:.2f}</span>
                     </div>
                     <div class="advice">
                         <strong>アドバイス:</strong><br>
-                        {'<br>'.join(right_motor['advice'])}
+                        {"<br>".join(right_motor["advice"])}
                     </div>
                 </div>
             </div>
-            
+
             <div class="metric-card">
                 <h2>⚖️ 左右バランス分析</h2>
                 <div class="metric">
                     <span class="metric-label">左平均速度</span>
-                    <span class="metric-value">{balance['left_avg_speed']:.2f}</span>
+                    <span class="metric-value">{balance["left_avg_speed"]:.2f}</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">右平均速度</span>
-                    <span class="metric-value">{balance['right_avg_speed']:.2f}</span>
+                    <span class="metric-value">{balance["right_avg_speed"]:.2f}</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">差異率</span>
-                    <span class="metric-value {('status-good' if balance['diff_ratio'] < 5 else 'status-warning' if balance['diff_ratio'] < 10 else 'status-bad')}">{balance['diff_ratio']:.2f}%</span>
+                    <span class="metric-value {("status-good" if balance["diff_ratio"] < 5 else "status-warning" if balance["diff_ratio"] < 10 else "status-bad")}">{balance["diff_ratio"]:.2f}%</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">回帰係数</span>
-                    <span class="metric-value">{balance['regression_a']:.6f}</span>
+                    <span class="metric-value">{balance["regression_a"]:.6f}</span>
                 </div>
             </div>
         """
-        
+
         if len(left_scores) > 1:
-            html += """
+            html += (
+                """
             <div class="chart-container">
                 <h2>📊 スコア推移</h2>
                 <div id="scoreChart" style="height: 400px;"></div>
                 <script>
                     var data = [
                         {{
-                            x: """ + json.dumps(timestamps) + """,
-                            y: """ + json.dumps(left_scores) + """,
+                            x: """
+                + json.dumps(timestamps)
+                + """,
+                            y: """
+                + json.dumps(left_scores)
+                + """,
                             name: '左モーター',
                             mode: 'lines+markers',
                             line: {{color: '#667eea'}}
                         }},
                         {{
-                            x: """ + json.dumps(timestamps) + """,
-                            y: """ + json.dumps(right_scores) + """,
+                            x: """
+                + json.dumps(timestamps)
+                + """,
+                            y: """
+                + json.dumps(right_scores)
+                + """,
                             name: '右モーター',
                             mode: 'lines+markers',
                             line: {{color: '#764ba2'}}
@@ -336,6 +353,7 @@ def generate_dashboard_html(results_list=None):
                 </script>
             </div>
             """
+            )
     else:
         html += """
             <div class="metric-card">
@@ -343,7 +361,7 @@ def generate_dashboard_html(results_list=None):
                 <p>まだ解析データがありません。PowerShellスクリプトまたはAPIで解析を実行してください。</p>
             </div>
         """
-    
+
     # 画像ランの一覧を取得
     video_runs_html = ""
     try:
@@ -352,28 +370,38 @@ def generate_dashboard_html(results_list=None):
             for item in sorted(os.listdir(IMAGE_RUNS_DIR)):
                 item_path = os.path.join(IMAGE_RUNS_DIR, item)
                 if os.path.isdir(item_path):
-                    img_exts = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
-                    imgs = [f for f in os.listdir(item_path) if f.lower().endswith(img_exts)]
+                    img_exts = (".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")
+                    imgs = [
+                        f for f in os.listdir(item_path) if f.lower().endswith(img_exts)
+                    ]
                     has_vid = os.path.exists(os.path.join(item_path, "video.mp4"))
                     runs_list.append((item, len(imgs), has_vid))
-        
+
         if runs_list:
             video_runs_html += '<div class="metric-card" style="grid-column: 1 / -1; margin-top: 20px;">'
-            video_runs_html += '<h2>🎥 走行動画解析（サーバー側データ一覧）</h2>'
+            video_runs_html += "<h2>🎥 走行動画解析（サーバー側データ一覧）</h2>"
             video_runs_html += '<table style="width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left;">'
             video_runs_html += '<tr style="background: #f0f4ff;"><th style="padding: 12px; border-bottom: 2px solid #ddd;">走行ディレクトリ名</th><th style="padding: 12px; border-bottom: 2px solid #ddd;">検出画像数</th><th style="padding: 12px; border-bottom: 2px solid #ddd;">ステータス</th><th style="padding: 12px; border-bottom: 2px solid #ddd;">動画操作</th></tr>'
             for run, count, has_vid in runs_list:
-                status_str = '<span class="status-good" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: normal;">生成済み</span>' if has_vid else '<span class="status-warning" style="background: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: normal;">未生成</span>'
-                action_str = f'<a href="/video/runs/{run}/video" target="_blank" style="color: #667eea; text-decoration: none; font-weight: bold; border: 1px solid #667eea; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; background: white;">📥 再生 / DL</a>' if has_vid else '<span style="color: #999;">-</span>'
+                status_str = (
+                    '<span class="status-good" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: normal;">生成済み</span>'
+                    if has_vid
+                    else '<span class="status-warning" style="background: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: normal;">未生成</span>'
+                )
+                action_str = (
+                    f'<a href="/video/runs/{run}/video" target="_blank" style="color: #667eea; text-decoration: none; font-weight: bold; border: 1px solid #667eea; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; background: white;">📥 再生 / DL</a>'
+                    if has_vid
+                    else '<span style="color: #999;">-</span>'
+                )
                 video_runs_html += f'<tr><td style="padding: 12px; border-bottom: 1px solid #eee;"><code>{run}</code></td><td style="padding: 12px; border-bottom: 1px solid #eee;">{count} 枚</td><td style="padding: 12px; border-bottom: 1px solid #eee;">{status_str}</td><td style="padding: 12px; border-bottom: 1px solid #eee;">{action_str}</td></tr>'
-            video_runs_html += '</table></div>'
+            video_runs_html += "</table></div>"
         else:
             video_runs_html += '<div class="metric-card" style="grid-column: 1 / -1; margin-top: 20px;"><h2>🎥 走行動画解析</h2><p>画像データがありません。</p></div>'
     except Exception as e:
         video_runs_html += f'<div class="metric-card" style="grid-column: 1 / -1; margin-top: 20px;"><h2>🎥 走行動画解析</h2><p>読み込みエラー: {str(e)}</p></div>'
-        
+
     html += video_runs_html
-    
+
     html += """
             <div class="footer">
                 <p>このダッシュボードは FastAPI サーバーから自動生成されています</p>
@@ -385,6 +413,7 @@ def generate_dashboard_html(results_list=None):
     """
     return html
 
+
 @app.post("/analyze")
 async def analyze_data(
     file: UploadFile = File(...),
@@ -394,7 +423,7 @@ async def analyze_data(
     kd_l: float = Form(0.00),
     kp_r: float = Form(1.00),
     ki_r: float = Form(0.00),
-    kd_r: float = Form(0.00)
+    kd_r: float = Form(0.00),
 ):
     """
     CSVファイルをアップロードして解析します。
@@ -402,36 +431,39 @@ async def analyze_data(
     try:
         contents = await file.read()
         csv_data = io.BytesIO(contents)
-        
+
         result = analyze_csv(csv_data, target_val, kp_l, ki_l, kd_l, kp_r, ki_r, kd_r)
-        
+
         # タイムスタンプキーを生成（マイクロ秒を含めて衝突防止）
-        timestamp_key = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        
+        timestamp_key = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
         # CSVファイルを保存
         csv_filename = f"{RESULTS_DIR}/data_{timestamp_key}.csv"
-        with open(csv_filename, 'wb') as f:
+        with open(csv_filename, "wb") as f:
             f.write(contents)
-            
+
         # 結果をファイルに保存
         save_result(result, timestamp_key)
-        
+
         return JSONResponse(content=result)
-    
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"解析エラー: {str(e)}")
+
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """ダッシュボード表示"""
     return generate_dashboard_html()
 
+
 @app.get("/health")
 async def health_check():
     """ヘルスチェック"""
     return {"status": "ok"}
+
 
 @app.get("/results")
 async def get_results():
@@ -440,32 +472,46 @@ async def get_results():
     try:
         if not os.path.exists(RESULTS_DIR):
             return []
-        result_files = sorted([f for f in os.listdir(RESULTS_DIR) if f.startswith('result_') and f.endswith('.json')], reverse=True)
+        result_files = sorted(
+            [
+                f
+                for f in os.listdir(RESULTS_DIR)
+                if f.startswith("result_") and f.endswith(".json")
+            ],
+            reverse=True,
+        )
         for filename in result_files:
             try:
                 timestamp_key = filename[7:-5]  # result_ と .json を除く
-                with open(os.path.join(RESULTS_DIR, filename), 'r', encoding='utf-8') as f:
+                with open(
+                    os.path.join(RESULTS_DIR, filename), "r", encoding="utf-8"
+                ) as f:
                     data = json.load(f)
-                    
-                    results_list.append({
-                        "timestamp_key": timestamp_key,
-                        "timestamp": data.get("timestamp", ""),
-                        "target_val": data.get("target_val", 500.0),
-                        "left_score": data.get("left_motor", {}).get("score", 0.0),
-                        "right_score": data.get("right_motor", {}).get("score", 0.0),
-                        "kp_l": data.get("kp_l", 1.0),
-                        "ki_l": data.get("ki_l", 0.0),
-                        "kd_l": data.get("kd_l", 0.0),
-                        "kp_r": data.get("kp_r", 1.0),
-                        "ki_r": data.get("ki_r", 0.0),
-                        "kd_r": data.get("kd_r", 0.0),
-                    })
+
+                    results_list.append(
+                        {
+                            "timestamp_key": timestamp_key,
+                            "timestamp": data.get("timestamp", ""),
+                            "target_val": data.get("target_val", 500.0),
+                            "left_score": data.get("left_motor", {}).get("score", 0.0),
+                            "right_score": data.get("right_motor", {}).get(
+                                "score", 0.0
+                            ),
+                            "kp_l": data.get("kp_l", 1.0),
+                            "ki_l": data.get("ki_l", 0.0),
+                            "kd_l": data.get("kd_l", 0.0),
+                            "kp_r": data.get("kp_r", 1.0),
+                            "ki_r": data.get("ki_r", 0.0),
+                            "kd_r": data.get("kd_r", 0.0),
+                        }
+                    )
             except Exception:
                 pass
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"履歴読み込みエラー: {str(e)}")
-    
+
     return results_list
+
 
 @app.get("/results/{timestamp_key}/csv")
 async def get_result_csv(timestamp_key: str):
@@ -473,7 +519,10 @@ async def get_result_csv(timestamp_key: str):
     csv_path = os.path.join(RESULTS_DIR, f"data_{timestamp_key}.csv")
     if not os.path.exists(csv_path):
         raise HTTPException(status_code=404, detail="CSVファイルが見つかりません。")
-    return FileResponse(csv_path, media_type="text/csv", filename=f"data_{timestamp_key}.csv")
+    return FileResponse(
+        csv_path, media_type="text/csv", filename=f"data_{timestamp_key}.csv"
+    )
+
 
 @app.get("/results/{timestamp_key}/json")
 async def get_result_json(timestamp_key: str):
@@ -482,11 +531,14 @@ async def get_result_json(timestamp_key: str):
     if not os.path.exists(json_path):
         raise HTTPException(status_code=404, detail="JSONファイルが見つかりません。")
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"JSONファイル読み込みエラー: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"JSONファイル読み込みエラー: {str(e)}"
+        )
+
 
 @app.get("/video/runs")
 async def get_video_runs():
@@ -494,47 +546,58 @@ async def get_video_runs():
     runs = []
     if not os.path.exists(IMAGE_RUNS_DIR):
         return runs
-        
+
     try:
         for item in sorted(os.listdir(IMAGE_RUNS_DIR)):
             item_path = os.path.join(IMAGE_RUNS_DIR, item)
             if os.path.isdir(item_path):
                 # 画像ファイル数をカウント
-                img_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
-                images = [f for f in os.listdir(item_path) if f.lower().endswith(img_extensions)]
-                
+                img_extensions = (".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")
+                images = [
+                    f
+                    for f in os.listdir(item_path)
+                    if f.lower().endswith(img_extensions)
+                ]
+
                 # 動画ファイルの存在チェック
                 video_path = os.path.join(item_path, "video.mp4")
                 has_video = os.path.exists(video_path)
-                
-                runs.append({
-                    "run_name": item,
-                    "image_count": len(images),
-                    "has_video": has_video,
-                    "video_url": f"/video/runs/{item}/video" if has_video else None
-                })
+
+                runs.append(
+                    {
+                        "run_name": item,
+                        "image_count": len(images),
+                        "has_video": has_video,
+                        "video_url": f"/video/runs/{item}/video" if has_video else None,
+                    }
+                )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"画像ラン一覧の取得エラー: {str(e)}")
-        
+        raise HTTPException(
+            status_code=500, detail=f"画像ラン一覧の取得エラー: {str(e)}"
+        )
+
     return runs
+
 
 @app.post("/video/upload")
 async def upload_video_run(file: UploadFile = File(...), run_name: str = Form(None)):
     """画像のZIPファイルをアップロードして展開"""
-    if not file.filename.endswith('.zip'):
-        raise HTTPException(status_code=400, detail="ZIPファイルのみアップロード可能です。")
-        
+    if not file.filename.endswith(".zip"):
+        raise HTTPException(
+            status_code=400, detail="ZIPファイルのみアップロード可能です。"
+        )
+
     # run_name が未指定の場合はタイムスタンプを使用
     if not run_name:
         run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+
     run_dir = os.path.join(IMAGE_RUNS_DIR, run_name)
     if os.path.exists(run_dir):
         # 既存フォルダは削除して上書き
         shutil.rmtree(run_dir)
-        
+
     os.makedirs(run_dir, exist_ok=True)
-    
+
     try:
         contents = await file.read()
         zip_data = io.BytesIO(contents)
@@ -546,24 +609,25 @@ async def upload_video_run(file: UploadFile = File(...), run_name: str = Form(No
                 if not filename:
                     continue
                 # 画像ファイルのみを展開
-                img_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+                img_extensions = (".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")
                 if filename.lower().endswith(img_extensions):
                     target_path = os.path.join(run_dir, filename)
-                    with zip_ref.open(zip_info) as source, open(target_path, "wb") as target:
+                    with (
+                        zip_ref.open(zip_info) as source,
+                        open(target_path, "wb") as target,
+                    ):
                         shutil.copyfileobj(source, target)
-                        
+
         # 画像が展開されたか確認
-        img_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+        img_extensions = (".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")
         images = [f for f in os.listdir(run_dir) if f.lower().endswith(img_extensions)]
         if not images:
             shutil.rmtree(run_dir)
-            raise HTTPException(status_code=400, detail="ZIPファイル内に画像ファイルが見つかりません。")
-            
-        return {
-            "status": "success",
-            "run_name": run_name,
-            "image_count": len(images)
-        }
+            raise HTTPException(
+                status_code=400, detail="ZIPファイル内に画像ファイルが見つかりません。"
+            )
+
+        return {"status": "success", "run_name": run_name, "image_count": len(images)}
     except zipfile.BadZipFile:
         if os.path.exists(run_dir):
             shutil.rmtree(run_dir)
@@ -573,61 +637,69 @@ async def upload_video_run(file: UploadFile = File(...), run_name: str = Form(No
             shutil.rmtree(run_dir)
         raise HTTPException(status_code=500, detail=f"アップロード処理エラー: {str(e)}")
 
+
 @app.post("/video/runs/{run_name}/generate")
 async def generate_video(run_name: str, fps: int = Form(10)):
     """指定されたランの画像から動画を生成"""
     run_dir = os.path.join(IMAGE_RUNS_DIR, run_name)
     if not os.path.exists(run_dir) or not os.path.isdir(run_dir):
-        raise HTTPException(status_code=404, detail="指定されたディレクトリが見つかりません。")
-        
+        raise HTTPException(
+            status_code=404, detail="指定されたディレクトリが見つかりません。"
+        )
+
     video_path = os.path.join(run_dir, "video.mp4")
-    
+
     # 既存の動画ファイルがある場合は削除
     if os.path.exists(video_path):
         try:
             os.remove(video_path)
         except:
             pass
-            
+
     try:
         # 画像から動画への変換を実行
         images_to_video(run_dir, video_path, fps=fps)
         return {
             "status": "success",
             "run_name": run_name,
-            "video_url": f"/video/runs/{run_name}/video"
+            "video_url": f"/video/runs/{run_name}/video",
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"動画生成エラー: {str(e)}")
 
+
 @app.get("/video/runs/{run_name}/video")
 async def get_video(run_name: str):
     """生成された動画ファイルのダウンロード/ストリーミング"""
     video_path = os.path.join(IMAGE_RUNS_DIR, run_name, "video.mp4")
     if not os.path.exists(video_path):
-        raise HTTPException(status_code=404, detail="動画ファイルが見つかりません。動画を生成してください。")
-        
+        raise HTTPException(
+            status_code=404,
+            detail="動画ファイルが見つかりません。動画を生成してください。",
+        )
+
     return FileResponse(
-        video_path,
-        media_type="video/mp4",
-        filename=f"{run_name}_video.mp4"
+        video_path, media_type="video/mp4", filename=f"{run_name}_video.mp4"
     )
+
 
 @app.delete("/video/runs/{run_name}")
 async def delete_video_run(run_name: str):
     """画像ランディレクトリ全体の削除"""
     run_dir = os.path.join(IMAGE_RUNS_DIR, run_name)
     if not os.path.exists(run_dir):
-        raise HTTPException(status_code=404, detail="指定されたデータが見つかりません。")
-        
+        raise HTTPException(
+            status_code=404, detail="指定されたデータが見つかりません。"
+        )
+
     try:
         shutil.rmtree(run_dir)
         return {"status": "success", "message": f"{run_name} を削除しました。"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"削除エラー: {str(e)}")
 
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
