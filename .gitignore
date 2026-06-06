@@ -1,5 +1,5 @@
 .venv/
-image_results/
+image_runs/
 __pycache__/
 *.pyc
 .streamlit/
